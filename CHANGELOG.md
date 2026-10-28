@@ -8,10 +8,10 @@
 
 ### 升级须知
 
-- Codex 无项目会话归类需要配套更新 Server 和 Connector；使用 Desktop 或 DSH 插件内置 Connector 时，需要更新对应安装包或插件。
+- Codex 无项目会话归类需要配套更新 Server 和 Connector；使用 Desktop 或 DSH 插件内置 Connector 时，需要更新对应安装包或插件。（[fa4cdbce](https://github.com/Eternity714/Agents-Anywhere/commit/fa4cdbce9cb1d4c01606338332da565034d54366)）
 
 - **本机三端一起升级**：Desktop、Connector 和 DSH 插件之间的本机通道改用 MeshCall，2.0.x 与 2.1.0 互不兼容。只升级一端时，2.0.x Connector 会一直停在「等待 DSH」。（[#353](https://github.com/anywhere-labs/Agents-Anywhere/pull/353)）
-- **数据库迁移**：Server 需要执行迁移 `v2_42`–`v2_45`。`/api/v2/admin/dashboard/*` 已删除，2.0.x 的 Web / Desktop 打开看板会得到 404。（[#296](https://github.com/anywhere-labs/Agents-Anywhere/pull/296)、[#299](https://github.com/anywhere-labs/Agents-Anywhere/pull/299)、[#290](https://github.com/anywhere-labs/Agents-Anywhere/pull/290)）
+- **数据库迁移**：Server 需要执行迁移 `v2_42`–`v2_45`。`/api/v2/admin/dashboard/*` 已删除，2.0.x 的 Web / Desktop 打开看板会得到 404。（[#296](https://github.com/anywhere-labs/Agents-Anywhere/pull/296)、[#299](https://github.com/anywhere-labs/Agents-Anywhere/pull/299)、[#290](https://github.com/anywhere-labs/Agents-Anywhere/pull/290)、[fa4cdbce](https://github.com/Eternity714/Agents-Anywhere/commit/fa4cdbce9cb1d4c01606338332da565034d54366)）
 - **移除 SQLite 和 v1 导入工具**：Server 不再支持 SQLite 后端，也去掉了 v1 导入工具。仍在 v1 的部署要先用 2.0.x 完成导入；部署配置里的 `AGENT_SERVER_DB_BACKEND` 可以删除。（[#299](https://github.com/anywhere-labs/Agents-Anywhere/pull/299)）
 - **手机端**：Android 和 iOS 的 2.0.3 仍然可以使用，但登录续期、按供应商分组模型、「未同步」状态等需要 2.1.0。
 
@@ -26,7 +26,7 @@
 
 ### Codex 与 Claude
 
-- 修复 Codex 无项目会话按随机目录拆成多个项目，统一显示在「未分组」，并保留历史、工作目录和归档状态。
+- 修复 Codex 无项目会话按随机目录拆成多个项目，统一显示在「未分组」，并保留历史、工作目录和归档状态。（[fa4cdbce](https://github.com/Eternity714/Agents-Anywhere/commit/fa4cdbce9cb1d4c01606338332da565034d54366)）
 
 - 接入 Codex App / IDE 插件的 IPC 协议，在 Codex 窗口里打开的会话也能在 AA 中继续操作，包括发消息、中断、审批、切换模型和权限、发送附件；支持 macOS 和 Windows。（[#299](https://github.com/anywhere-labs/Agents-Anywhere/pull/299)、[#334](https://github.com/anywhere-labs/Agents-Anywhere/pull/334)）
 - 新增 `/open-in-codex-app` 和 `/kill-chatgpt` 命令：前者在 Codex App 中打开当前会话，后者退出 App 以释放写锁。（[#299](https://github.com/anywhere-labs/Agents-Anywhere/pull/299)）
@@ -107,7 +107,7 @@
 
 ### Android
 
-- 项目视图新增「未分组」会话，支持筛选、归档状态切换及继续加载较旧会话。
+- 项目视图新增「未分组」会话，支持筛选、归档状态切换及继续加载较旧会话。（[fa4cdbce](https://github.com/Eternity714/Agents-Anywhere/commit/fa4cdbce9cb1d4c01606338332da565034d54366)）
 
 - 扫码登录的 token 过期后自动续期，终端重连前也会刷新凭据，修复项目列表一直加载。（[#260](https://github.com/anywhere-labs/Agents-Anywhere/pull/260)）
 - 输入框随软键盘上移，不再被键盘挡住。（[#255](https://github.com/anywhere-labs/Agents-Anywhere/pull/255)）
