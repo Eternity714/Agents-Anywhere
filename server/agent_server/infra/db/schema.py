@@ -406,6 +406,7 @@ sessions = Table(
         default=_legacy_runtime_id_default,
     ),
     Column("origin", Text, nullable=False, server_default="connector_import"),
+    Column("native_project_assigned", Integer),
     Column("model_selection_id", Text),
     Column("permission_selection_id", Text),
     Column("external_session_id", Text),

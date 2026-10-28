@@ -5,6 +5,12 @@ import hashlib
 import json
 
 import pytest
+from alembic import command
+from sqlalchemy import BigInteger, create_engine, inspect, text
+from sqlalchemy.dialects.postgresql import asyncpg as postgresql_asyncpg
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
+
 from agent_server.infra.db.engine import build_engine, resolve_db_url
 from agent_server.infra.db.migrations import (
     CURRENT_SCHEMA_REVISION,
@@ -25,12 +31,7 @@ from agent_server.infra.db.schema import (
     sessions,
     timeline_items,
 )
-from alembic import command
 from migrations.versions import v2_24
-from sqlalchemy import BigInteger, create_engine, inspect, text
-from sqlalchemy.dialects.postgresql import asyncpg as postgresql_asyncpg
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.pool import NullPool
 
 
 def _sync_url(url: str) -> str:
@@ -1014,9 +1015,30 @@ def test_unversioned_runtime_schema_is_classified_by_actual_columns(tmp_path,
     )
 
 
-def test_current_schema_version_is_v2_44() -> None:
-    assert CURRENT_SCHEMA_REVISION == "v2_44"
-    assert CURRENT_SCHEMA_VERSION == "2.44"
+def test_current_schema_version_is_v2_45() -> None:
+    assert CURRENT_SCHEMA_REVISION == "v2_45"
+    assert CURRENT_SCHEMA_VERSION == "2.45"
+
+
+def test_v2_45_preserves_sessions_and_leaves_old_membership_unknown(fresh_database_url):
+    url = fresh_database_url
+    upgrade_database(db_url=url, revision="v2_44")
+    engine = create_engine(_sync_url(url))
+    try:
+        with engine.begin() as connection:
+            _insert_required(connection, "users", {"id": "owner"})
+            _insert_required(connection, "connectors", {"id": "device", "user_id": "owner"})
+            _insert_required(connection, "sessions", {
+                "id": "old", "connector_id": "device", "runtime": "codex", "cwd": "/repo",
+            })
+        upgrade_database(db_url=url)
+        with engine.connect() as connection:
+            row = connection.execute(text(
+                "SELECT cwd, native_project_assigned FROM sessions WHERE id='old'"
+            )).one()
+            assert tuple(row) == ("/repo", None)
+    finally:
+        engine.dispose()
 
 
 def _insert_required(connection, table: str, values: dict) -> None:

@@ -105,6 +105,9 @@ internal fun HomeProjectList(
     deviceAgentFilter: ProjectDeviceAgentFilter,
     hasProjectsInOtherStatuses: Boolean,
     allSessions: List<AgentSession>,
+    hasMoreSessions: Boolean,
+    loadingMoreSessions: Boolean,
+    onLoadMoreSessions: () -> Unit,
     projectPreferences: HomeProjectPreferences,
     projectSessionStatus: ProjectSessionStatusFilter,
     onProjectSessionStatusChange: (ProjectSessionStatusFilter) -> Unit,
@@ -129,10 +132,16 @@ internal fun HomeProjectList(
     }
     val pinnedProjects = ordered.filter(AgentProject::pinned)
     val regularProjects = ordered.filterNot(AgentProject::pinned)
+    val unassignedSessions = remember(allSessions, projectSessionStatus, deviceAgentFilter) {
+        com.agentsanywhere.app.feature.sessions.unassignedProjectSessions(
+            allSessions, projectSessionStatus, deviceAgentFilter,
+        )
+    }
+    var unassignedExpanded by remember { mutableStateOf(true) }
     val agentLabel = deviceAgentFilter.runtime?.runtimeTypeLabel()
     val filtersActive = deviceAgentFilter.active || projectSessionStatus != ProjectSessionStatusFilter.Active
 
-    if (projects.isEmpty() && pinnedSessions.isEmpty()) {
+    if (projects.isEmpty() && pinnedSessions.isEmpty() && unassignedSessions.isEmpty() && !hasMoreSessions) {
         Box(Modifier.fillMaxSize()) {
             AppEmptyState(
                 message = stringResource(
@@ -232,6 +241,35 @@ internal fun HomeProjectList(
                         onSessionLongPress = onSessionLongPress,
                         onOpenSession = onOpenSession,
                     )
+                }
+            }
+        }
+        if (unassignedSessions.isNotEmpty() || hasMoreSessions) {
+            item("unassigned-title") {
+                HomeListSectionHeader(
+                    label = stringResource(R.string.home_unassigned_sessions),
+                    expanded = unassignedExpanded,
+                    onClick = { unassignedExpanded = !unassignedExpanded },
+                )
+            }
+            if (unassignedExpanded) {
+                items(unassignedSessions, key = { "unassigned-session-${it.id}" }) { session ->
+                    HomeProjectSessionRow(
+                        session = session,
+                        inset = false,
+                        onClick = { onOpenSession(session) },
+                        onLongPress = { onSessionLongPress(session, it) },
+                    )
+                }
+                if (hasMoreSessions) {
+                    item("unassigned-more") {
+                        ArchivedListFooter(
+                            failed = false,
+                            loading = loadingMoreSessions,
+                            enabled = !loadingMoreSessions,
+                            onLoadMore = onLoadMoreSessions,
+                        )
+                    }
                 }
             }
         }

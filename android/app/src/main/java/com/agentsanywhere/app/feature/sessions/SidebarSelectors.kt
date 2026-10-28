@@ -73,6 +73,14 @@ fun projectHasVisibleSessions(
 fun projectHasActiveSessions(project: AgentProject, sessions: Collection<AgentSession>): Boolean =
     projectHasVisibleSessions(project, sessions, ProjectSessionStatusFilter.Active)
 
+fun unassignedProjectSessions(
+    sessions: Collection<AgentSession>,
+    status: ProjectSessionStatusFilter,
+    filter: ProjectDeviceAgentFilter = ProjectDeviceAgentFilter(),
+): List<AgentSession> = sessions.filter {
+    it.projectId.isNullOrBlank() && projectSessionMatchesStatus(it, status) && filter.matches(it)
+}.sortedWith(if (status == ProjectSessionStatusFilter.Archived) archivedSessionComparator() else sessionListComparator())
+
 fun sortProjectsByActivity(projects: List<AgentProject>, sessions: Collection<AgentSession>): List<AgentProject> {
     val activity = sessions.filter { !it.projectId.isNullOrBlank() }.groupBy { it.projectId }
         .mapValues { (_, items) -> items.maxOf { timestampMillis(it.sortKey) } }

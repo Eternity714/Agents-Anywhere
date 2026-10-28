@@ -92,6 +92,9 @@ class AgentRuntime(ABC):
             is not AgentRuntime.list_complete_session_inventory
         )
 
+    async def acknowledge_session_meta_sync(self, session: SessionMeta) -> None:
+        """Commit metadata checkpoints only after durable ingestion succeeds."""
+
     async def get_session_snapshot(
         self,
         session_id: str,

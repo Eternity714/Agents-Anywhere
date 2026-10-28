@@ -272,6 +272,7 @@ class RuntimeSyncRunner:
             await self._ingest_scanner_notifications(
                 [_session_meta_notification(session)]
             )
+            await runtime.acknowledge_session_meta_sync(session)
             return
         logger.info(
             "existing session timeline sync started runtime={} session_id={} external_session_id={}",
@@ -307,6 +308,7 @@ class RuntimeSyncRunner:
                 ]
             )
             self._last_active_session_updates[session.session_id] = active_update
+            await runtime.acknowledge_session_meta_sync(session)
             logger.info(
                 "existing session sync deferred active session runtime={} session_id={} status={}",
                 session.runtime,
@@ -364,6 +366,7 @@ class RuntimeSyncRunner:
         publish_elapsed_ms = (time.monotonic() - publish_started_at) * 1000
         if prepared is not None and prepared.commit is not None and not deferred_replacement:
             await prepared.commit()
+        await runtime.acknowledge_session_meta_sync(session)
         if publish_elapsed_ms >= 250 or synced_items >= 100:
             logger.info(
                 "existing session timeline sync published runtime={} session_id={} items={} elapsed_ms={:.1f}",

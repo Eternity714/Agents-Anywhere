@@ -311,6 +311,14 @@ class SessionNotificationHandler:
         external_session_id = params.get("externalSessionId")
         runtime, runtime_id = runtime_identity_from_params(params)
         source_observation = _session_meta_source_observation(params, runtime)
+        metadata = params.get("metadata")
+        native_project_assigned = (
+            metadata.get("nativeProjectAssigned")
+            if runtime == "codex" and isinstance(metadata, dict)
+            else None
+        )
+        if type(native_project_assigned) is not bool:
+            native_project_assigned = None
         previous_session: SessionView | None = None
         try:
             if isinstance(external_session_id, str):
@@ -339,6 +347,7 @@ class SessionNotificationHandler:
                 last_activity_at=params.get("lastActivityAt"),
                 mark_read_on_change=True,
                 source_state=None,
+                native_project_assigned=native_project_assigned,
             )
             if source_observation is not None:
                 session = await self._store.update_session_source_state(
@@ -365,6 +374,7 @@ class SessionNotificationHandler:
                     source_observed_at=params.get("sourceObservedAt"),
                     last_activity_at=params.get("lastActivityAt"),
                     source_state=None,
+                    native_project_assigned=native_project_assigned,
                 )
             except MissingWorkspaceError:
                 return IngestEffect()

@@ -248,6 +248,30 @@ def _session_view_query(latest_item: tuple[Any, Any] | None = None) -> Any:
 
 
 class SessionRepositoryMixin:
+    async def _resolve_session_project(
+        self, conn: Any, *, connector_id: str, runtime: str, origin: str,
+        cwd: str | None, native_project_assigned: int | bool | None,
+        now: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        if runtime != "codex" or origin == "platform" or native_project_assigned != 0:
+            return await self._ensure_project_for_workspace(
+                conn, connector_id=connector_id, workspace_path=cwd, now=now,
+            )
+        # Keep the same active-connector lock as project creation: a revocation
+        # cannot race an otherwise projectless session insert/update.
+        connector = (await conn.execute(
+            select(connectors_t.c.device_os).where(
+                connectors_t.c.id == connector_id, connectors_t.c.revoked == 0,
+            ).with_for_update(read=True)
+        )).first()
+        if connector is None:
+            raise KeyError(connector_id)
+        normalized_cwd = (
+            _clean_workspace_path(cwd, connector.device_os)[0]
+            if cwd is not None else None
+        )
+        return None, normalized_cwd
+
     async def get_session_runtime(self, session_id: str) -> str | None:
         async with self._engine.connect() as conn:
             row = (
@@ -374,6 +398,7 @@ class SessionRepositoryMixin:
         permission_selection_id: str | None = None,
         origin: str = "connector_import",
         source_state: str | None = None,
+        native_project_assigned: bool | None = None,
     ) -> SessionView:
         identity = _runtime_identity(runtime, runtime_id)
         canonical_session_id = session_id
@@ -417,6 +442,7 @@ class SessionRepositoryMixin:
             permission_selection_id=permission_selection_id,
             origin=origin,
             source_state=source_state,
+            native_project_assigned=native_project_assigned,
         )
 
     @session_revision_fenced
@@ -438,10 +464,13 @@ class SessionRepositoryMixin:
         permission_selection_id: str | None = None,
         origin: str = "connector_import",
         source_state: str | None = None,
+        native_project_assigned: bool | None = None,
     ) -> SessionView:
         identity = _runtime_identity(runtime, runtime_id)
         runtime = str(identity.runtime_type)
         runtime_id = str(identity.runtime_id)
+        if runtime != "codex" or type(native_project_assigned) is not bool:
+            native_project_assigned = None
         has_model_selection_id = model_selection_id is not None
         has_permission_selection_id = permission_selection_id is not None
         now = utc_now()
@@ -464,10 +493,13 @@ class SessionRepositoryMixin:
                 )
             ).first()
             if existing is None:
-                project_id, normalized_cwd = await self._ensure_project_for_workspace(
+                project_id, normalized_cwd = await self._resolve_session_project(
                     conn,
                     connector_id=connector_id,
-                    workspace_path=cwd,
+                    runtime=runtime,
+                    origin=normalized_origin,
+                    cwd=cwd,
+                    native_project_assigned=native_project_assigned,
                     now=now,
                 )
                 await conn.execute(
@@ -478,6 +510,10 @@ class SessionRepositoryMixin:
                         runtime=runtime,
                         runtime_id=runtime_id,
                         origin=normalized_origin,
+                        native_project_assigned=(
+                            int(native_project_assigned)
+                            if native_project_assigned is not None else None
+                        ),
                         model_selection_id=model_selection_id,
                         permission_selection_id=permission_selection_id,
                         external_session_id=external_session_id,
@@ -514,6 +550,8 @@ class SessionRepositoryMixin:
                             sessions_t.c.title_source,
                             sessions_t.c.cwd,
                             sessions_t.c.project_id,
+                            sessions_t.c.origin,
+                            sessions_t.c.native_project_assigned,
                             sessions_t.c.status,
                             sessions_t.c.model_selection_id,
                             sessions_t.c.permission_selection_id,
@@ -530,6 +568,8 @@ class SessionRepositoryMixin:
                 if current.runtime != runtime or current.runtime_id != runtime_id:
                     raise ValueError("session runtime identity is immutable")
                 values: dict[str, Any] = {}
+                if native_project_assigned is not None:
+                    values["native_project_assigned"] = int(native_project_assigned)
                 if external_session_id is not None:
                     values["external_session_id"] = external_session_id
                 if (
@@ -539,11 +579,16 @@ class SessionRepositoryMixin:
                 ):
                     values["title"] = title
                     values["title_source"] = TITLE_SOURCE_CONNECTOR
-                if cwd is not None or current.project_id is None:
-                    project_id, normalized_cwd = await self._ensure_project_for_workspace(
+                if cwd is not None or current.project_id is None or native_project_assigned is not None:
+                    project_id, normalized_cwd = await self._resolve_session_project(
                         conn,
                         connector_id=connector_id,
-                        workspace_path=cwd or current.cwd,
+                        runtime=runtime,
+                        origin=current.origin,
+                        cwd=cwd if cwd is not None else current.cwd,
+                        native_project_assigned=values.get(
+                            "native_project_assigned", current.native_project_assigned,
+                        ),
                         now=now,
                     )
                     values["project_id"] = project_id
@@ -1758,6 +1803,7 @@ class SessionRepositoryMixin:
         last_activity_at: str | None = None,
         mark_read_on_change: bool = False,
         source_state: str | None = None,
+        native_project_assigned: bool | None = None,
     ) -> SessionView:
         values: dict[str, Any] = {}
         if status is not None:
@@ -1780,6 +1826,8 @@ class SessionRepositoryMixin:
                     select(
                         sessions_t.c.connector_id,
                         sessions_t.c.project_id,
+                        sessions_t.c.origin,
+                        sessions_t.c.native_project_assigned,
                         sessions_t.c.status,
                         sessions_t.c.title,
                         sessions_t.c.title_source,
@@ -1795,6 +1843,8 @@ class SessionRepositoryMixin:
             ).first()
             if row is None:
                 raise KeyError(session_id)
+            if row.runtime == "codex" and type(native_project_assigned) is bool:
+                values["native_project_assigned"] = int(native_project_assigned)
             if (
                 title is not None
                 and row.title_source != TITLE_SOURCE_USER
@@ -1802,11 +1852,16 @@ class SessionRepositoryMixin:
             ):
                 values["title"] = title
                 values["title_source"] = TITLE_SOURCE_CONNECTOR
-            if cwd is not None or row.project_id is None:
-                project_id, normalized_cwd = await self._ensure_project_for_workspace(
+            if cwd is not None or row.project_id is None or "native_project_assigned" in values:
+                project_id, normalized_cwd = await self._resolve_session_project(
                     conn,
                     connector_id=row.connector_id,
-                    workspace_path=cwd if cwd is not None else row.cwd,
+                    runtime=row.runtime,
+                    origin=row.origin,
+                    cwd=cwd if cwd is not None else row.cwd,
+                    native_project_assigned=values.get(
+                        "native_project_assigned", row.native_project_assigned,
+                    ),
                 )
                 values["project_id"] = project_id
                 values["cwd"] = normalized_cwd

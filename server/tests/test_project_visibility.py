@@ -13,6 +13,131 @@ from agent_server.infra.repositories.facade import Store
 NOW = "2026-09-06T00:00:00Z"
 
 
+@pytest.mark.parametrize("metadata", [None, {}, {"nativeProjectAssigned": None},
+    {"nativeProjectAssigned": "false"}, {"nativeProjectAssigned": 0},
+    {"nativeProjectAssigned": []}])
+def test_invalid_or_missing_native_assignment_keeps_workspace_grouping(store, metadata):
+    from agent_server.services.connector_notifications import SessionNotificationHandler
+
+    async def scenario():
+        handler = SessionNotificationHandler(store)
+        await handler.apply(connector_id="device", method="session.meta.upsert", params={
+            "sessionId": "unknown", "runtime": "codex", "externalSessionId": "unknown",
+            "cwd": "/repo", "metadata": metadata,
+        })
+        assert (await store.get_session("unknown")).projectId is not None
+
+    asyncio.run(scenario())
+
+
+def test_native_assignment_notification_is_scoped_and_persistent(store):
+    from agent_server.services.connector_notifications import (
+        NotificationValidationError,
+        SessionNotificationHandler,
+    )
+
+    async def scenario():
+        handler = SessionNotificationHandler(store)
+        params = {"sessionId": "native", "runtime": "codex", "runtimeId": "rti_codexaaaa",
+            "externalSessionId": "thread", "cwd": "/scratch/i",
+            "metadata": {"nativeProjectAssigned": False}}
+        await handler.apply(connector_id="device", method="session.meta.upsert", params=params)
+        assert (await store.get_session("native")).projectId is None
+        # A distinct runtime instance with the same native thread ID keeps its group.
+        await handler.apply(connector_id="device", method="session.meta.upsert", params={
+            **params, "sessionId": "other", "runtimeId": "rti_codexbbbb", "metadata": {},
+        })
+        assert (await store.get_session("other")).projectId is not None
+        async with store.engine.begin() as connection:
+            await connection.execute(insert(connectors).values(
+                id="other-device", user_id="owner", name="Other", status="online",
+                token_hash="other", token_prefix="other", revoked=0,
+                created_at=NOW, updated_at=NOW,
+            ))
+        with pytest.raises(NotificationValidationError):
+            await handler.apply(connector_id="other-device", method="session.meta.upsert", params=params)
+        with pytest.raises(NotificationValidationError):
+            await handler.apply(connector_id="device", method="session.meta.upsert", params={
+                **params, "runtimeId": "rti_codexbbbb", "externalSessionId": "alien",
+            })
+        assert (await store.get_session("native")).projectId is None
+        await handler.apply(connector_id="device", method="session.meta.upsert", params={
+            **params, "runtime": "claude", "runtimeId": "claude", "sessionId": "claude",
+        })
+        assert (await store.get_session("claude")).projectId is not None
+
+    asyncio.run(scenario())
+
+
+def test_codex_projectless_import_preserves_cwd_and_never_recreates_project(store):
+    async def scenario():
+        imported = await store.upsert_connector_session(
+            connector_id="device", session_id="loose", runtime="codex",
+            external_session_id="native_loose", cwd="/scratch/she",
+            native_project_assigned=False,
+        )
+        assert imported.projectId is None
+        assert imported.cwd == "/scratch/she"
+        assert await store.list_projects(user_id="owner") == []
+        # IPC and older connectors omit the observation, but still send cwd.
+        for _ in range(2):
+            refreshed = await store.update_session_snapshot(
+                session_id=imported.id, cwd="/scratch/she", title="Updated",
+            )
+            assert refreshed.projectId is None
+        repeated = await store.upsert_connector_session(
+            connector_id="device", session_id="loose", runtime="codex",
+            external_session_id="native_loose", cwd="/scratch/she",
+        )
+        assert repeated.projectId is None
+        assigned = await store.update_session_snapshot(
+            session_id=imported.id, cwd="/repo", native_project_assigned=True,
+        )
+        assert assigned.projectId is not None and assigned.cwd == "/repo"
+
+    asyncio.run(scenario())
+
+
+def test_codex_projectless_observation_corrects_existing_import_without_unarchiving(store):
+    async def scenario():
+        imported = await store.upsert_connector_session(
+            connector_id="device", session_id="old", runtime="codex",
+            external_session_id="native_old", cwd="/scratch/zai",
+        )
+        assert imported.projectId is not None
+        async with store.engine.begin() as connection:
+            await connection.execute(update(sessions).where(sessions.c.id == "old").values(
+                archived=1, archived_at=NOW, pinned=1,
+            ))
+        updated = await store.update_session_snapshot(
+            session_id="old", native_project_assigned=False,
+        )
+        assert updated.projectId is None and updated.cwd == "/scratch/zai"
+        assert updated.archived and updated.pinned and updated.archivedAt == NOW
+        projects = await store.list_projects(user_id="owner")
+        assert len(projects) == 1
+        assert projects[0].sidebarSessionCounts.model_dump() == {"active": 0, "archived": 0}
+
+    asyncio.run(scenario())
+
+
+def test_codex_projectless_observation_preserves_explicit_aa_project(store):
+    async def scenario():
+        project = await store.create_project(
+            user_id="owner", connector_id="device", name="Chosen", workspace_path="/repo",
+        )
+        created = await store.create_session(
+            user_id="owner", connector_id="device", project_id=project.id,
+            runtime="codex", external_session_id="aa_native", title="AA", cwd="/repo",
+        )
+        updated = await store.update_session_snapshot(
+            session_id=created.id, native_project_assigned=False,
+        )
+        assert updated.projectId == project.id
+
+    asyncio.run(scenario())
+
+
 @pytest.fixture
 def store(tmp_path):
     repository = Store()

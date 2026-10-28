@@ -5,10 +5,24 @@ import com.agentsanywhere.app.model.AgentSession
 import com.agentsanywhere.app.model.ProjectSessionCounts
 import com.agentsanywhere.app.model.SessionStatus
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProjectDeviceAgentFilterTest {
+    @Test
+    fun unassignedSessionsRespectStatusDeviceRuntimeAndPinnedDeduplication() {
+        val loose = session("codex").copy(id = "loose", projectId = null)
+        val pinned = loose.copy(id = "pinned", pinned = true)
+        val archived = loose.copy(id = "archived", archived = true)
+        val values = listOf(loose, pinned, archived, session("codex"),
+            loose.copy(id = "other-device", connectorId = "device-b"),
+            loose.copy(id = "other-runtime", runtime = "claude"))
+        val filter = ProjectDeviceAgentFilter(connectorId = "device-a", runtime = "codex")
+        assertEquals(listOf("loose"), unassignedProjectSessions(values, ProjectSessionStatusFilter.Active, filter).map { it.id })
+        assertEquals(listOf("archived"), unassignedProjectSessions(values, ProjectSessionStatusFilter.Archived, filter).map { it.id })
+        assertEquals(setOf("loose", "archived"), unassignedProjectSessions(values, ProjectSessionStatusFilter.All, filter).map { it.id }.toSet())
+    }
     private fun project(manuallyCreated: Boolean = false) = AgentProject(
         id = "project",
         userId = "user",

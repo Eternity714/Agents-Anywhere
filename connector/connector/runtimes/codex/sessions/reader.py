@@ -44,6 +44,10 @@ from connector.runtimes.codex.sessions.history_index import (
     valid_read_state,
 )
 from connector.runtimes.codex.sessions.inventory import list_all_codex_threads
+from connector.runtimes.codex.sessions.project_membership import (
+    project_membership_metadata,
+    read_app_project_memberships,
+)
 from connector.runtimes.codex.sessions.rollout_settings import (
     rollout_permission_settings,
 )
@@ -59,6 +63,10 @@ def _session_sync_key(thread_id: str) -> str:
     return f"codex/session-sync/{thread_id}"
 
 
+def _project_membership_sync_key(thread_id: str) -> str:
+    return f"codex/project-membership/{thread_id}"
+
+
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -72,6 +80,7 @@ class CodexSessionReader:
     ensure_started: EnsureStarted
     list_model_catalog: ListModelCatalog
     list_permission_catalog: ListPermissionCatalog
+    codex_home: str = ""
     pending_messages: PendingClientMessageRegistry | None = None
     timeline: CodexTimelineAccumulator | None = None
     notice_handler: CodexNoticeHandler | None = None
@@ -98,6 +107,7 @@ class CodexSessionReader:
             archived=False,
         )
         observed_at = _utc_now()
+        app_memberships = await asyncer.asyncify(read_app_project_memberships)(self.codex_home)
         sessions: list[SessionMeta] = []
         for thread_ref_mapping in result.threads:
             thread_ref = dict(thread_ref_mapping)
@@ -110,6 +120,7 @@ class CodexSessionReader:
                 force=force,
                 availability="available",
                 observed_at=observed_at,
+                app_memberships=app_memberships,
             )
             sessions.append(session)
         elapsed_ms = (time.monotonic() - started_at) * 1000
@@ -143,6 +154,7 @@ class CodexSessionReader:
             page_size=page_size,
         )
         sessions_by_thread_id: dict[str, SessionMeta] = {}
+        app_memberships = await asyncer.asyncify(read_app_project_memberships)(self.codex_home)
         for availability, threads in (
             ("available", active_threads),
             ("archived", archived_threads),
@@ -159,6 +171,7 @@ class CodexSessionReader:
                         force=force,
                         availability=availability,
                         observed_at=observed_at,
+                        app_memberships=app_memberships,
                     )
                 )
         return tuple(sessions_by_thread_id.values())
@@ -170,6 +183,7 @@ class CodexSessionReader:
         force: bool,
         availability: str,
         observed_at: str,
+        app_memberships: Mapping[str, bool | None],
     ) -> SessionMeta:
         local_state = codex_sessions.local_thread_state(thread_ref)
         sync_marker = codex_sessions.thread_sync_marker(thread_ref)
@@ -194,6 +208,18 @@ class CodexSessionReader:
         previous_sync = await self.host.sync_state_read(sync_key)
         previous_marker = (
             previous_sync.get("marker") if isinstance(previous_sync, dict) else None
+        )
+        project_metadata = project_membership_metadata(thread_id, thread_ref, app_memberships)
+        project_assigned = project_metadata.get("nativeProjectAssigned")
+        previous_membership = await self.host.sync_state_read(_project_membership_sync_key(thread_id))
+        previous_project_assigned = (
+            previous_membership.get("assigned")
+            if isinstance(previous_membership, Mapping) else None
+        )
+        if type(previous_project_assigned) is not bool:
+            previous_project_assigned = None
+        membership_changed = (
+            project_assigned is not None and project_assigned != previous_project_assigned
         )
         changed = force or sync_marker is None or previous_marker != sync_marker
         checkpoint = await self.host.sync_state_read(f"codex/timeline-sync/{thread_id}")
@@ -250,18 +276,30 @@ class CodexSessionReader:
             ordering_time=ordering_time,
             source_state=source_state,
             metadata={
+                **project_metadata,
                 "local_state": local_state,
                 "hidden": hidden,
                 "source": "codex.thread/list",
                 "sync": {
                     "key": sync_key,
                     "marker": sync_marker,
-                    "changed": changed,
+                    "changed": changed or membership_changed,
                     "requires_timeline_sync": requires_timeline_sync,
                     "previous_marker": previous_marker,
                 },
             },
         )
+
+    async def acknowledge_session_meta_sync(self, session: SessionMeta) -> None:
+        observed = session.metadata.get("nativeProjectAssigned")
+        if type(observed) is bool and session.external_session_id:
+            # Confirm the observation that was actually ingested, never a newer
+            # scan's pending state. Timeline commits cannot acknowledge membership.
+            await self.host.sync_state_write(
+                _project_membership_sync_key(session.external_session_id),
+                {"assigned": observed},
+            )
+
     async def prepare_session_timeline_sync(
         self,
         session_id: str,

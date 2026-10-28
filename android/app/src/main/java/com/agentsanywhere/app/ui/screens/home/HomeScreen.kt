@@ -538,6 +538,7 @@ private fun HomeContent(
                     onSessionLongPress = onSessionLongPress,
                     onOpenSession = onOpenSession,
                     onPairDevice = onPairDevice,
+                    onLoadMore = onLoadMore,
                 )
             } else {
                 HomeList(
@@ -585,6 +586,7 @@ private fun HomeProjectModeList(
     onSessionLongPress: (AgentSession, Rect) -> Unit,
     onOpenSession: (AgentSession) -> Unit,
     onPairDevice: () -> Unit,
+    onLoadMore: (HomeTab) -> Unit,
 ) {
     when {
         state.isLoading && !state.hasLoaded -> HomeLoadingState()
@@ -615,6 +617,8 @@ private fun HomeProjectModeList(
                     .groupBy { it.projectId.orEmpty() }
                     .mapValues { (_, sessions) -> sessions.sortedWith(sessionListComparator()) }
             }
+            val loadActive = projectSessionStatus != ProjectSessionStatusFilter.Archived && state.activeHasMore
+            val loadArchived = projectSessionStatus != ProjectSessionStatusFilter.Active && state.archivedHasMore
             HomeProjectList(
                 projects = state.projects.filter { projectHasVisibleSessions(it, allSessions, projectSessionStatus, deviceAgentFilter) },
                 devices = state.devices,
@@ -624,6 +628,12 @@ private fun HomeProjectModeList(
                 deviceAgentFilter = deviceAgentFilter,
                 hasProjectsInOtherStatuses = state.projects.any { projectHasVisibleSessions(it, allSessions, ProjectSessionStatusFilter.All) },
                 allSessions = allSessions,
+                hasMoreSessions = loadActive || loadArchived,
+                loadingMoreSessions = (loadActive && state.isLoadingMoreActive) || (loadArchived && state.isLoadingMoreArchived),
+                onLoadMoreSessions = {
+                    if (loadActive && !state.isLoadingMoreActive) onLoadMore(HomeTab.Active)
+                    if (loadArchived && !state.isLoadingMoreArchived) onLoadMore(HomeTab.Archived)
+                },
                 projectPreferences = projectPreferences,
                 projectSessionStatus = projectSessionStatus,
                 onProjectSessionStatusChange = onProjectSessionStatusChange,

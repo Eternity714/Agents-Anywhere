@@ -68,6 +68,7 @@ from connector.runtimes.codex.ipc import deeplink as ipc_deeplink
 from connector.runtimes.codex.lifecycle.runtime_lifecycle import CodexRuntimeLifecycle
 from connector.runtimes.codex.notifications import CodexNotificationProjector
 from connector.runtimes.codex.notifications.projector import notification_event
+from connector.runtimes.codex.provider_config import effective_codex_home
 from connector.runtimes.codex.sdk.runtime_client import (
     CodexModelListResult,
     CodexRuntimeClient,
@@ -161,6 +162,7 @@ class CodexRuntime(AgentRuntime):
             ensure_started=self.start,
             list_model_catalog=self._catalogs.list_model_catalog,
             list_permission_catalog=self._catalogs.list_permission_catalog,
+            codex_home=effective_codex_home(self.config.values.get("codexHome")),
             pending_messages=self._pending_messages,
             timeline=self._timeline,
             notice_handler=self._notifications.notice_handler,
@@ -762,6 +764,9 @@ class CodexRuntime(AgentRuntime):
         force: bool = False,
     ) -> tuple[SessionMeta, ...]:
         return await self._session_reader.list_sessions(limit, cursor, force)
+
+    async def acknowledge_session_meta_sync(self, session: SessionMeta) -> None:
+        await self._session_reader.acknowledge_session_meta_sync(session)
 
     async def list_complete_session_inventory(
         self,

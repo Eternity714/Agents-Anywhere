@@ -502,6 +502,9 @@ class RuntimeInstance(AgentRuntime):
             runtime_id=self.instance.runtime_id,
         )
 
+    async def acknowledge_session_meta_sync(self, session: SessionMeta) -> None:
+        await self.native_runtime.acknowledge_session_meta_sync(session)
+
     async def list_permission_catalog(
         self,
         query: str | None = None,

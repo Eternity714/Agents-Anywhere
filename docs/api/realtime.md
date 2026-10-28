@@ -322,6 +322,23 @@ The connector application layer bridges `RuntimeHostClient` calls to these
 server-facing notification payloads. Runtime adapters should never call
 connector HTTP/WS transports directly.
 
+### Codex 导入会话的项目归属
+
+`session.meta.upsert` 的可选 `metadata.nativeProjectAssigned` 是布尔值，仅适用于
+Codex：当前实例的 Codex Home 中，App 状态 `.codex-global-state.json` 的
+`projectless-thread-ids` 明确包含该线程、且没有冲突项目分配时为 `false`；有效本地项目
+分配或原生线程的非空 `projectId` 为 `true`。原生 `projectId: null` 本身不足以判断，
+因为 App 的旧项目登记也可能返回 null。目录名、输出目录和目录前缀不作为归属依据。
+
+Server 持久保存最后有效观察：`false` 的导入会话保留实际 `cwd`，但 `projectId`
+返回 `null`，客户端显示在「未分组」。后续不带观察的历史、IPC、状态更新不能将它
+按目录重新分组；明确观察到 `true` 后恢复现有目录分组。App 状态缺失、损坏、超出 8 MiB、
+权限不足、记录冲突或格式不支持时表示未知，保留最后有效分组。归属变化独立触发元数据同步，
+不要求历史消息变化，且在服务端确认投递后才提交检查点。非法值和其他 Runtime 的该字段被忽略，
+不具有授权或修改其他来源会话的能力。
+AA 创建时用户已明确选择的项目继续保留；不删除旧项目记录、会话历史、附件或用户归档。
+现有客户端继续消费可空的 `SessionView.projectId`，无新增客户端接口字段。
+
 ## Terminal realtime
 
 Current terminal channels include:
