@@ -150,6 +150,22 @@ class RuntimeSyncRunner:
                     len(sessions),
                     timeline_sync_count,
                 )
+                # Project membership is independent of history. Publish every
+                # observed change before a large/blocked timeline can delay the
+                # rest of the inventory, including after a Connector restart.
+                memberships = [
+                    session for session in sessions
+                    if session.runtime == "codex"
+                    and type(session.metadata.get("nativeProjectAssigned")) is bool
+                    and (recover or session_sync_changed(session) is not False)
+                ]
+                for offset in range(0, len(memberships), 100):
+                    batch = memberships[offset:offset + 100]
+                    await self._ingest_scanner_notifications([
+                        _session_meta_notification(session) for session in batch
+                    ])
+                    for session in batch:
+                        await runtime.acknowledge_session_meta_sync(session)
                 for session in sessions:
                     try:
                         recovery_key = (runtime_id, session.session_id)

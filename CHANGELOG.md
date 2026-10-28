@@ -26,7 +26,7 @@
 
 ### Codex 与 Claude
 
-- 修复 Codex 无项目会话按随机目录拆成多个项目，统一显示在「未分组」，并保留历史、工作目录和归档状态。（[fa4cdbce](https://github.com/Eternity714/Agents-Anywhere/commit/fa4cdbce9cb1d4c01606338332da565034d54366)）
+- 修复 Codex 无项目会话按随机目录拆成多个项目，包括旧版名单未记录的历史会话，统一显示在「未分组」并保留历史、工作目录和归档状态；分组修正不再等待大段历史同步。（[fa4cdbce](https://github.com/Eternity714/Agents-Anywhere/commit/fa4cdbce9cb1d4c01606338332da565034d54366)）
 
 - 接入 Codex App / IDE 插件的 IPC 协议，在 Codex 窗口里打开的会话也能在 AA 中继续操作，包括发消息、中断、审批、切换模型和权限、发送附件；支持 macOS 和 Windows。（[#299](https://github.com/anywhere-labs/Agents-Anywhere/pull/299)、[#334](https://github.com/anywhere-labs/Agents-Anywhere/pull/334)）
 - 新增 `/open-in-codex-app` 和 `/kill-chatgpt` 命令：前者在 Codex App 中打开当前会话，后者退出 App 以释放写锁。（[#299](https://github.com/anywhere-labs/Agents-Anywhere/pull/299)）

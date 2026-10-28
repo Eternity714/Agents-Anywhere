@@ -107,7 +107,12 @@ class CodexSessionReader:
             archived=False,
         )
         observed_at = _utc_now()
-        app_memberships = await asyncer.asyncify(read_app_project_memberships)(self.codex_home)
+        app_memberships = await asyncer.asyncify(read_app_project_memberships)(
+            self.codex_home, tuple(
+                thread_id for thread in result.threads
+                if (thread_id := codex_sessions.thread_id_from_result(thread)) is not None
+            ),
+        )
         sessions: list[SessionMeta] = []
         for thread_ref_mapping in result.threads:
             thread_ref = dict(thread_ref_mapping)
@@ -154,7 +159,12 @@ class CodexSessionReader:
             page_size=page_size,
         )
         sessions_by_thread_id: dict[str, SessionMeta] = {}
-        app_memberships = await asyncer.asyncify(read_app_project_memberships)(self.codex_home)
+        app_memberships = await asyncer.asyncify(read_app_project_memberships)(
+            self.codex_home, tuple(
+                thread_id for thread in (*active_threads, *archived_threads)
+                if (thread_id := codex_sessions.thread_id_from_result(thread)) is not None
+            ),
+        )
         for availability, threads in (
             ("available", active_threads),
             ("archived", archived_threads),

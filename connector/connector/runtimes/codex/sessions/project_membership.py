@@ -3,14 +3,57 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import sqlite3
+from collections.abc import Mapping, Sequence
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
 MAX_APP_STATE_BYTES = 8 * 1024 * 1024
 
 
-def read_app_project_memberships(codex_home: str) -> dict[str, bool | None]:
+def _read_native_project_memberships(
+    codex_home: str, thread_ids: Sequence[str],
+) -> dict[str, bool | None]:
+    """Read only requested threads from the newest native schema, including WAL."""
+    if not thread_ids:
+        return {}
+    try:
+        candidates = [
+            path for path in Path(codex_home).glob("state_*.sqlite")
+            if path.stem.removeprefix("state_").isdigit() and path.is_file()
+        ]
+        if not candidates:
+            return {}
+        database = max(candidates, key=lambda path: int(path.stem.removeprefix("state_")))
+        result: dict[str, bool | None] = {}
+        # Never create or migrate Codex's database, nor ignore its live WAL.
+        with closing(sqlite3.connect(
+            database.resolve().as_uri() + "?mode=ro", uri=True, timeout=0.1,
+        )) as conn:
+            conn.execute("PRAGMA query_only = ON")
+            conn.execute("BEGIN")
+            for offset in range(0, len(thread_ids), 500):
+                batch = thread_ids[offset:offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                rows = conn.execute(
+                    f"SELECT id, project_id FROM threads WHERE id IN ({placeholders})", batch,
+                )
+                for thread_id, project_id in rows:
+                    result[thread_id] = (
+                        False if project_id is None else True
+                        if isinstance(project_id, str) and project_id.strip() else None
+                    )
+        return result
+    except (OSError, sqlite3.Error, ValueError):
+        # Busy, damaged, missing-column or unreadable databases are unknown.
+        # Do not fall back to an older schema after a failed current read.
+        return {}
+
+
+def read_app_project_memberships(
+    codex_home: str, thread_ids: Sequence[str] = (),
+) -> dict[str, bool | None]:
     try:
         with (Path(codex_home) / ".codex-global-state.json").open("rb") as source:
             raw = source.read(MAX_APP_STATE_BYTES + 1)
@@ -47,6 +90,20 @@ def read_app_project_memberships(codex_home: str) -> dict[str, bool | None]:
             and projects[project_id].get("id") == project_id
         ):
             result[thread_id] = True
+    # Old threads can be absent from both legacy lists. A native NULL supplies
+    # the missing observation, but legacy assignments still take precedence:
+    # Codex can add project_id before migrating those assignments into SQLite.
+    # Require both legacy registries to be present and valid before interpreting
+    # absence as meaningful. Truncated/unsupported App state stays unknown.
+    if (
+        "thread-project-assignments" in state
+        and isinstance(state.get("local-projects"), dict)
+    ):
+        for thread_id, assigned in _read_native_project_memberships(codex_home, thread_ids).items():
+            if assigned is True:
+                result[thread_id] = True
+            elif thread_id not in result and assigned is False:
+                result[thread_id] = False
     return result
 
 
